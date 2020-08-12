@@ -1,7 +1,7 @@
 # Game_of_Life
 John Conway's Game of Life in OpenMP, NVIDIA CUDA
 
-![OpenMP Version Game of Life](.\openmp.png)
+![OpenMP Version Game of Life](./openmp.png)
 
 ![CUDA Version Game of Life](./cuda.png)
 
@@ -24,7 +24,11 @@ This project uses [SFML(Simple and Fast Multimedia Library)](https://www.sfml-de
 
 `git clone https://github.com/Kwonkyu/Game_of_Life.git`
 
+Then run executable with single parameter(generation limit).
 
+`./game_of_life.exe 500`
+
+This will run 500 sequences of game of life over OpenMP, CUDA each.
 
 ## Basic Idea
 

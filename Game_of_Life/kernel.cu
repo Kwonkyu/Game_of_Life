@@ -12,20 +12,17 @@
 #define NONE -1 // NONE is a place where cell, alive or dead, is ignored.
 #define DEAD 0 // DEAD is a place where cell is dead.
 #define LIVE 1 // LIVE is a place where cell is alive.
-// A width, height size of 2d array which will be flattened to 1d array.
-// The cells are placed in this 2d array(so called 'gamefield') and processed.
+
+// A width, height size of 2d array(which will be flattened to 1d array).
+// The cells are placed in this 2d array(so called 'gamefield') with state of NONE/DEAD/LIVE.
 #define DEFAULT_WIDTH   512
 #define DEFAULT_HEIGHT  512
-// An option to apply shared memory technique or not. No major differences at result.
-#define SHAREDMEMORY
+
 
 // CUDA version of Game of Life.
 // It takes separate gamefield to calculate next generation without any interferences.
 __global__ void golParallel(int* gamefieldOriginal, int* gamefieldBuffer) {
-#ifdef SHAREDMEMORY
-    __shared__ int gamefieldSharedMemory[512][3]; // A shared memory to hold top, middle, bottom line.
-#endif
-    // A thread layout is 1d array * 1d array, which is 2d array in result.
+    // Like above, the thread layout is 1d array * 1d array, which is 2d array in result.
     // It's because dimension of grid and block is 1 so it's like rows * cols for 2d array.
     // A default size of rows and cols of this program is 512 * 512 which is defined at sfml_functions.h.
     // So if you want to change the size of gamefield or dimension of grid or block, a variables below
@@ -36,102 +33,75 @@ __global__ void golParallel(int* gamefieldOriginal, int* gamefieldBuffer) {
     // If you can't understand why expression of gridID is like below, read 'Thread Hierarchy' from guidebook.
     int gridID = blockDim.x * blockIdx.x + blockID;
     int currentHeight = gridID / width;
-    // One of the best optimization ideas to implement game of life into computer program is
-    // considering border area(first and last one of row and col) as 'deadzone'. In this code, 'NONE'.
-    //
-    //
-    ///
-    //         D   O                 W   O    R  K  !!
-    //
-    //
+    // The one of clever ideas to implement game of life is considering border area,
+    // which is the first and the last row, column, as 'deadzone'. In this code, 'NONE'.
+    // If not, you have to check index-out-of-range everytime because game of life calculates cell's next generation
+    // state based on neighbor cells, like drawings below.
+    //  *-----------------
+    //  | 1 | 2 | 3 | ...
+    //  | 4 | X | 5 | ...
+    //  | 6 | 7 | 8 | ...
+    //   ... ... ...
+    // Cell X is your current cell. You need to check cell 1 ~ 8 whether it's alive or not to calculate.
+    // What if cell X is upper-leftmost cell of gamefield? Then accessing cell 1, 2, 3, 4, 6 will raise out-of-range error!
+    // But what if border area is deadzone, where cells are always dead? We don't need to calculate those cells
+    // and can start game of life from #1 to #MAX-1 row and column. Then it'll looks like below.
+    //  *-----------------
+    //  | - | - | - | ...
+    //  | - | 1 | 2 | ...
+    //  | - | 4 | X | ...
+    //   ... ... ...
+    // Even though it's 'deadzone', but it's still inside of gamefield. So there'll be no out-of-range error!
     int availableWidth = blockDim.x - 1;
     int availableHeight = gridDim.x - 1;
-#ifdef SHAREDMEMORY
-        if(currentHeight == 0 || currentHeight == height - 1) {
-            gamefieldBuffer[gridID] = NONE;
+    
+    // Skip if current cell is deadzone!
+    if (gamefieldOriginal[gridID] == NONE) {
+        gamefieldBuffer[gridID] = NONE;
+    }
+    // Else, count number of alive neighbor cells and calculate next generation.
+    else {
+        int neighbors = 0;
+        if (gamefieldOriginal[gridID - width - 1] == LIVE) { // upper left.
+            neighbors++;
         }
-        else {
-            gamefieldSharedMemory[blockID][0] = gamefieldOriginal[gridID - width];
-            gamefieldSharedMemory[blockID][1] = gamefieldOriginal[gridID];
-            gamefieldSharedMemory[blockID][2] = gamefieldOriginal[gridID + width];
-            __syncthreads();
+        if (gamefieldOriginal[gridID - width] == LIVE) { // upper.
+            neighbors++;
         }
-#endif
-        // calculate next generation of current cell
-        // 1 2 3
-        // 4   5
-        // 6 7 8
-        // if current cell is in borderline, skip.
-        if (gamefieldOriginal[gridID] == NONE) {
-            gamefieldBuffer[gridID] = NONE;
+        if (gamefieldOriginal[gridID - width + 1] == LIVE) { // upper right.
+            neighbors++;
         }
-        else {
-            int neighbors = 0;
-#ifdef SHAREDMEMORY
-            if (gamefieldSharedMemory[blockID - 1][0] == LIVE) { // 1
-                neighbors++;
-            }
-            if (gamefieldSharedMemory[blockID][0] == LIVE) { // 2
-                neighbors++;
-            }
-            if (gamefieldSharedMemory[blockID + 1][0] == LIVE) { // 3
-                neighbors++;
-            }
-            if (gamefieldSharedMemory[blockID - 1][1] == LIVE) { // 4
-                neighbors++;
-            }
-            if (gamefieldSharedMemory[blockID + 1][1] == LIVE) { // 5
-                neighbors++;
-            }
-            if (gamefieldSharedMemory[blockID - 1][2] == LIVE) { // 6
-                neighbors++;
-            }
-            if (gamefieldSharedMemory[blockID][2] == LIVE) { // 7
-                neighbors++;
-            }
-            if (gamefieldSharedMemory[blockID + 1][2] == LIVE) { // 8
-                neighbors++;
-            }
-#endif
-#ifndef SHAREDMEMORY
-            if (gamefieldOriginal[gridID - width - 1] == LIVE) { // 1
-                neighbors++;
-            }
-            if (gamefieldOriginal[gridID - width] == LIVE) { // 2
-                neighbors++;
-            }
-            if (gamefieldOriginal[gridID - width + 1] == LIVE) { // 3
-                neighbors++;
-            }
-            if (gamefieldOriginal[gridID - 1] == LIVE) { // 4
-                neighbors++;
-            }
-            if (gamefieldOriginal[gridID + 1] == LIVE) { // 5
-                neighbors++;
-            }
-            if (gamefieldOriginal[gridID + width - 1] == LIVE) { // 6
-                neighbors++;
-            }
-            if (gamefieldOriginal[gridID + width] == LIVE) { // 7
-                neighbors++;
-            }
-            if (gamefieldOriginal[gridID + width + 1] == LIVE) { // 8
-                neighbors++;
-            }
-#endif
-            // calculate new cell state.
-            if (gamefieldOriginal[gridID] == DEAD) {
-                if (neighbors == 3) {
-                    gamefieldBuffer[gridID] = LIVE;
-                }
-            }
-            else if (gamefieldOriginal[gridID] == LIVE) {
-                if (neighbors < 2 || neighbors > 3) {
-                    gamefieldBuffer[gridID] = DEAD;
-                }
-            }
-       // }
+        if (gamefieldOriginal[gridID - 1] == LIVE) { // left.
+            neighbors++;
         }
+        if (gamefieldOriginal[gridID + 1] == LIVE) { // right.
+            neighbors++;
+        }
+        if (gamefieldOriginal[gridID + width - 1] == LIVE) { // lower left.
+            neighbors++;
+        }
+        if (gamefieldOriginal[gridID + width] == LIVE) { // lower.
+            neighbors++;
+        }
+        if (gamefieldOriginal[gridID + width + 1] == LIVE) { // lower right.
+            neighbors++;
+        }
+        
+        if (gamefieldOriginal[gridID] == DEAD) {
+            if (neighbors == 3) {
+                gamefieldBuffer[gridID] = LIVE;
+            }
+        }
+        else if (gamefieldOriginal[gridID] == LIVE) {
+            if (neighbors < 2 || neighbors > 3) {
+                gamefieldBuffer[gridID] = DEAD;
+            }
+        }
+    }
+
+
+    /* WAIT A MINUTE... isn't there should be __syncthread()? What if gamefield changed before other?*/
+
 
     gamefieldOriginal[gridID] = gamefieldBuffer[gridID];
 }
@@ -179,7 +149,12 @@ int main(int argc, char** argv)
     /* ************************************************************************ */
     /* *                        OpenMP, CUDA Initialization                   * */
     /* ************************************************************************ */
-    // variable declaration
+    // gamefield variable declaration
+
+    //     WHY THERE IS SEPARATE GAMEFIELD??
+    //     IT'S BECAUSE.....
+    //     OOOOOOOOOOOOOOOOOOOOPOPOPOPOPOPIQJWPDIQJWPIDJQWIDJ OVER HERE
+
     int* gamefieldParallelOMP;
     int* gamefieldBufferOMP;
 
@@ -187,7 +162,7 @@ int main(int argc, char** argv)
     int* gamefieldParallelCUDA;
     int* gamefieldBufferCUDA;
 
-    // initialize gamefield of host, device, device buffer.
+    // initialize gamefield of openmp, host, device, device buffer.
     size_t gamefieldSize = sizeof(int) * width * height;
     gamefieldParallelOMP = new int[width * height];
     gamefieldBufferOMP = new int[width * height];
@@ -195,37 +170,40 @@ int main(int argc, char** argv)
     cudaMalloc(&gamefieldParallelCUDA, gamefieldSize);
     cudaMalloc(&gamefieldBufferCUDA, gamefieldSize);
 
-    // Generate random values to gamefield and copy to cuda memory.
+    // clear every cell with 0.
     memset(gamefieldParallelOMP, 0, gamefieldSize);
     memset(gamefieldBufferOMP, 0, gamefieldSize);
     memset(gamefieldParallelHost, 0, gamefieldSize);
-
+    
+    // generate random values to cuda's gamefield.
     srand((unsigned)time(NULL));
     for (int i = 0; i < width * height; i++) {
         gamefieldParallelHost[i] = rand() % 2;
     }
-    // make border cells unavailable.
+    // make border cells deadzone.
     for (int i = 0; i < width; i++) {
-        gamefieldParallelHost[i] = NONE; // top borderline.
-        gamefieldParallelHost[i + width * (height - 1)] = NONE; // bottom borderline.
+        gamefieldParallelHost[i] = NONE; // top borderline(row).
+        gamefieldParallelHost[i + width * (height - 1)] = NONE; // bottom borderline(row).
     }
     for (int i = 0; i < height; i++) {
-        gamefieldParallelHost[0 + width * i] = NONE; // left borderline.
-        gamefieldParallelHost[width - 1 + width * i] = NONE; // right borderline.
+        gamefieldParallelHost[0 + width * i] = NONE; // left borderline(column).
+        gamefieldParallelHost[width - 1 + width * i] = NONE; // right borderline(column).
     }
 
+    // copy generated cells to openmp's gamefield to start from same initial state.
     for (int i = 0; i < width * height; i++) {
         gamefieldParallelOMP[i] = gamefieldParallelHost[i];
     }
+    // copy generated cells to device(gpu)'s memory to use cuda.
     cudaMemcpy(gamefieldParallelCUDA, gamefieldParallelHost, gamefieldSize, cudaMemcpyHostToDevice);
 
-    // number of threads equal to number of cells.
+    // thread layout for cuda execution. like said above, 1d array * 1d array = 2d array for gamefield.
     dim3 dimBlock(width, 1, 1);
     dim3 dimGrid(height, 1, 1);
     /* ************************************************************************ */
 
 
-    // Run the program as long as window is open
+    // Run the program as long as window is open and doesn't hit the limit.
     int currentTurn = 0;
     sf::RenderWindow windowOMP(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "Game of Life - OpenMP");
     while (windowOMP.isOpen()&& ++currentTurn <= turnLimit) {
@@ -244,13 +222,12 @@ int main(int argc, char** argv)
             handleViewZoom(event, view);
         }
 
-        // Fill color to window. It's mandatory to call clear() before draw().
+        // Fill color to window. It's mandatory to call clear() before draw() in SFML.
         windowOMP.clear(sf::Color::White);
         /* ************************************************* */
 
 
         // ======================= [ Game of Life ] ==========================
-
             // -- Rule of Game of Life
             // Cell borns when exactly 3 neighbor is LIVE
             // Cell remains alive when 2 or 3 neighbor is LIVE
@@ -258,15 +235,16 @@ int main(int argc, char** argv)
             // Cell with less than 2 neighbor dies with underpopulation
 
         // Calculate next generation of Game of Life in OpenMP.
-
 #pragma omp parallel for num_threads(4) schedule(dynamic, 3)
         for (int i = 0; i < height; i++) {
             for (int j = 0; j < width; j++) {
                 int currentIndex = width * i + j;
+                // skip current iteration if current cell is at deadzone.
                 if (gamefieldParallelOMP[currentIndex] == NONE) {
                     gamefieldBufferOMP[currentIndex] = NONE;
                     continue;
                 }
+                // count the number of alive neighbor cells
                 int neighbor = 0;
                 if (gamefieldParallelOMP[currentIndex - width - 1] == LIVE) {
                     neighbor++;
@@ -292,7 +270,7 @@ int main(int argc, char** argv)
                 if (gamefieldParallelOMP[currentIndex + width + 1] == LIVE) {
                     neighbor++;
                 }
-            
+                // calculate next generation state of current cell.
                 if (gamefieldParallelOMP[currentIndex] == DEAD) {
                     if (neighbor == 3) {
                         gamefieldBufferOMP[currentIndex] = LIVE;
@@ -306,7 +284,7 @@ int main(int argc, char** argv)
             }
         }
 
-        // Copy calculation result from CUDA to Host.
+        // Copy calculation result from buffer to original gamefield.
         for (int i = 0; i < width * height; i++) {
             gamefieldParallelOMP[i] = gamefieldBufferOMP[i];
         }
@@ -314,7 +292,7 @@ int main(int argc, char** argv)
 
 
         // ======================= [ DRAW FROM HERE ] ========================
-        // logic to draw cells based on field.
+        // logic to draw cells based on gamefield.
         int currentCell = NONE;
         for (int i = 0; i < height; i++) {
             rect.setPosition(sf::Vector2f(0 + MARGIN_LEFT, RECTGAP * i + MARGIN_TOP));
@@ -330,11 +308,10 @@ int main(int argc, char** argv)
             }
         }
         
+        // Show how many generations have done.
         sprintf(messageCharArray, "Game of Life: Sequence #%d", currentTurn);
         message.setString(sf::String(messageCharArray));
         windowOMP.draw(message);
-        // Show how many turns have done.
-
 
         // ==================================================================
 
@@ -345,6 +322,7 @@ int main(int argc, char** argv)
     windowOMP.close();
 
 
+    // Run the program as long as window is open and doesn't hit the limit.
     currentTurn = 0;
     sf::RenderWindow windowCUDA(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "Game of Life - CUDA");
     while (windowCUDA.isOpen() && ++currentTurn <= turnLimit) {
@@ -377,9 +355,8 @@ int main(int argc, char** argv)
             // Cell with less than 2 neighbor dies with underpopulation
 
         // Calculate next generation of Game of Life in CUDA.
-
         golParallel << <dimGrid, dimBlock >> > (gamefieldParallelCUDA, gamefieldBufferCUDA);
-        cudaDeviceSynchronize();
+        cudaDeviceSynchronize(); // reason to use cudaDeviceSynchronize() is...
 
         // Copy calculation result from CUDA to Host.
         cudaMemcpy(gamefieldParallelHost, gamefieldParallelCUDA, gamefieldSize, cudaMemcpyDeviceToHost);
