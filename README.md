@@ -34,8 +34,17 @@ This will run 500 sequences of game of life over OpenMP, CUDA each.
 
 The basic idea of how to implement game of life algorithm into CUDA is...
 
+### No Man's Land
+
+### Thread Layout
+
 A thread layout of this implementation is...
 
 ## Problem
 
 The problems of this project is...
+
+### Speed Drawback
+
+### Unreliable Result
+
